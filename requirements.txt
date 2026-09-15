@@ -1,0 +1,9 @@
+python-miio>=0.5.12
+requests>=2.30.0
+openai>=1.0.0
+python-dotenv>=1.0.0
+sounddevice>=0.5.0
+numpy>=2.0.0
+SpeechRecognition>=3.10.0
+edge-tts>=7.0.0
+onnxruntime>=1.20.0
