@@ -1,17 +1,14 @@
 import os
 import re
-from typing import Dict, Any, Optional, Tuple, Union
+from typing import Dict, Any, Optional, Tuple, Union, List
 from dotenv import load_dotenv
 from miio import Device
 from miio.exceptions import DeviceException
 
-# Загружаем переменные окружения из .env в текущей директории
 ENV_PATH = os.path.join(os.path.dirname(__file__), ".env")
-load_dotenv(ENV_PATH)
+load_dotenv(ENV_PATH, override=True)
 
-# Предустановленные именованные цвета
 PRESET_COLORS: Dict[str, Tuple[int, int, int]] = {
-    # Русские названия
     "красный": (255, 0, 0),
     "зеленый": (0, 255, 0),
     "зелёный": (0, 255, 0),
@@ -29,198 +26,204 @@ PRESET_COLORS: Dict[str, Tuple[int, int, int]] = {
     "теплый белый": (255, 214, 170),
     "тёплый белый": (255, 214, 170),
     "холодный белый": (200, 220, 255),
-    # Английские названия
-    "red": (255, 0, 0),
-    "green": (0, 255, 0),
-    "blue": (0, 0, 255),
-    "yellow": (255, 255, 0),
-    "cyan": (0, 255, 255),
-    "magenta": (255, 0, 255),
-    "purple": (128, 0, 128),
-    "orange": (255, 165, 0),
-    "pink": (255, 192, 203),
-    "white": (255, 255, 255),
 }
 
-class LampController:
-    """Контроллер управления лампой Xiaomi/Yeelight по протоколу MiIO."""
+ROOM_ALIASES = {
+    "спальня": ["спальня", "спальне", "спальню", "комната", "комнате", "комнату", "bedroom"],
+    "кухня": ["кухня", "кухне", "кухню", "kitchen"],
+    "прихожая": ["прихожая", "прихожей", "прихожую", "коридор", "коридоре", "hallway"],
+    "ванная": ["ванная", "ванной", "ванную", "туалет", "санузел", "bathroom"],
+    "все": ["все", "всё", "везде", "все лампы", "весь свет", "all"],
+}
 
-    def __init__(self, ip: Optional[str] = None, token: Optional[str] = None):
-        self.ip = ip or os.getenv("LAMP_IP")
-        self.token = token or os.getenv("LAMP_TOKEN")
 
-        if not self.ip:
-            raise ValueError("IP-адрес лампы не указан (задайте LAMP_IP в .env).")
-        if not self.token or self.token == "ваш_32_значный_токен_шифрования":
-            raise ValueError("Токен лампы не настроен. Запустите token_extractor.py для получения токена.")
+class SingleLamp:
+    """Управление одной конкретной лампой."""
 
+    def __init__(self, name: str, ip: str, token: str, has_color: bool = False):
+        self.name = name
+        self.ip = ip
+        self.token = token
+        self.has_color = has_color
         self.device = Device(ip=self.ip, token=self.token)
 
     def turn_on(self) -> Dict[str, Any]:
-        """Включает питание лампы."""
         try:
             res = self.device.send("set_power", ["on"])
             return {"status": "success", "power": "on", "response": res}
-        except DeviceException as e:
-            return {"status": "error", "message": f"Ошибка MiIO: {e}"}
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
     def turn_off(self) -> Dict[str, Any]:
-        """Выключает питание лампы."""
         try:
             res = self.device.send("set_power", ["off"])
             return {"status": "success", "power": "off", "response": res}
-        except DeviceException as e:
-            return {"status": "error", "message": f"Ошибка MiIO: {e}"}
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
     def toggle(self) -> Dict[str, Any]:
-        """Переключает состояние питания лампы."""
         try:
             res = self.device.send("toggle", [])
             return {"status": "success", "action": "toggle", "response": res}
         except DeviceException:
-            # Если метод toggle не поддерживается прошивкой, проверяем текущее состояние
             status = self.get_status()
             if status.get("status") == "success":
-                current_power = status.get("power")
-                if current_power == "on":
-                    return self.turn_off()
-                else:
-                    return self.turn_on()
+                return self.turn_off() if status.get("power") == "on" else self.turn_on()
             return {"status": "error", "message": "Не удалось переключить питание"}
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
     def set_brightness(self, level: int) -> Dict[str, Any]:
-        """
-        Устанавливает яркость лампы.
-        :param level: Процент яркости от 1 до 100.
-        """
         try:
             level = max(1, min(100, int(level)))
             res = self.device.send("set_bright", [level])
             return {"status": "success", "brightness": level, "response": res}
-        except DeviceException as e:
-            return {"status": "error", "message": f"Ошибка MiIO: {e}"}
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
     def set_rgb(self, red: int, green: int, blue: int) -> Dict[str, Any]:
-        """
-        Устанавливает цвет лампы в формате RGB.
-        :param red: Красный компонент от 0 до 255.
-        :param green: Зеленый компонент от 0 до 255.
-        :param blue: Синий компонент от 0 до 255.
-        """
+        if not self.has_color:
+            return {"status": "error", "message": f"Лампа в '{self.name}' не поддерживает смену цвета."}
         try:
-            r = max(0, min(255, int(red)))
-            g = max(0, min(255, int(green)))
-            b = max(0, min(255, int(blue)))
+            r, g, b = max(0, min(255, int(red))), max(0, min(255, int(green))), max(0, min(255, int(blue)))
             rgb_int = (r << 16) + (g << 8) + b
             res = self.device.send("set_rgb", [rgb_int])
-            return {"status": "success", "rgb": [r, g, b], "rgb_int": rgb_int, "response": res}
-        except DeviceException as e:
-            return {"status": "error", "message": f"Ошибка MiIO: {e}"}
+            return {"status": "success", "rgb": [r, g, b], "response": res}
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
     def set_color_temp(self, kelvin: int) -> Dict[str, Any]:
-        """
-        Устанавливает цветовую температуру белого света (в Кельвинах).
-        :param kelvin: Температура от 1700K (тёплый) до 6500K (холодный).
-        """
+        if not self.has_color:
+            return {"status": "error", "message": f"Лампа в '{self.name}' не поддерживает цветовую температуру."}
         try:
             k = max(1700, min(6500, int(kelvin)))
             res = self.device.send("set_ct_abx", [k, "smooth", 500])
             return {"status": "success", "color_temp": k, "response": res}
-        except DeviceException as e:
-            return {"status": "error", "message": f"Ошибка MiIO: {e}"}
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
     def set_color(self, color: Union[str, Tuple[int, int, int], list]) -> Dict[str, Any]:
-        """
-        Универсальный метод установки цвета по названию, HEX-коду или кортежу/списку RGB.
-        Примеры:
-            lamp.set_color("красный")
-            lamp.set_color("#00FF00")
-            lamp.set_color((0, 0, 255))
-        """
+        if not self.has_color:
+            return {"status": "error", "message": f"Лампа в '{self.name}' монохромная, цвет менять нельзя."}
+
         if isinstance(color, (tuple, list)) and len(color) == 3:
             return self.set_rgb(int(color[0]), int(color[1]), int(color[2]))
 
         if isinstance(color, str):
             clean = color.strip().lower()
             if clean in PRESET_COLORS:
-                r, g, b = PRESET_COLORS[clean]
-                return self.set_rgb(r, g, b)
-
-            # Проверка HEX (#RRGGBB или RRGGBB)
+                return self.set_rgb(*PRESET_COLORS[clean])
             hex_match = re.match(r"^#?([0-9a-f]{6})$", clean)
             if hex_match:
-                hex_val = hex_match.group(1)
-                r = int(hex_val[0:2], 16)
-                g = int(hex_val[2:4], 16)
-                b = int(hex_val[4:6], 16)
-                return self.set_rgb(r, g, b)
-
-            return {
-                "status": "error",
-                "message": f"Неизвестный цвет '{color}'. Доступные названия: {', '.join(list(PRESET_COLORS.keys())[:10])}...",
-            }
-
-        return {"status": "error", "message": f"Неверный формат цвета: {color}"}
+                val = hex_match.group(1)
+                return self.set_rgb(int(val[0:2], 16), int(val[2:4], 16), int(val[4:6], 16))
+        return {"status": "error", "message": f"Неизвестный цвет: {color}"}
 
     def get_status(self) -> Dict[str, Any]:
-        """Запрашивает состояние питания, текущей яркости и цвета."""
         try:
-            # Стандартные свойства для ламп Xiaomi/Yeelight
-            res = self.device.send("get_prop", ["power", "bright", "rgb", "ct", "color_mode"])
+            props = ["power", "bright"]
+            if self.has_color:
+                props.extend(["rgb", "ct", "color_mode"])
+            res = self.device.send("get_prop", props)
             if isinstance(res, list) and len(res) >= 2:
-                status_dict: Dict[str, Any] = {
-                    "status": "success",
-                    "power": res[0],
-                    "brightness": int(res[1]) if str(res[1]).isdigit() else res[1],
-                }
-                if len(res) >= 3 and res[2] is not None and str(res[2]).isdigit():
+                status = {"status": "success", "power": res[0], "brightness": res[1]}
+                if self.has_color and len(res) >= 3 and res[2]:
                     rgb_val = int(res[2])
-                    status_dict["rgb"] = [
-                        (rgb_val >> 16) & 0xFF,
-                        (rgb_val >> 8) & 0xFF,
-                        rgb_val & 0xFF,
-                    ]
-                    status_dict["rgb_int"] = rgb_val
-                if len(res) >= 4 and res[3] is not None and str(res[3]).isdigit():
-                    status_dict["color_temp"] = int(res[3])
-                if len(res) >= 5 and res[4] is not None and str(res[4]).isdigit():
-                    mode = int(res[4])
-                    mode_names = {1: "rgb", 2: "color_temp", 3: "hsv"}
-                    status_dict["color_mode"] = mode_names.get(mode, str(mode))
-                return status_dict
-
+                    status["rgb"] = [(rgb_val >> 16) & 0xFF, (rgb_val >> 8) & 0xFF, rgb_val & 0xFF]
+                return status
             return {"status": "success", "raw": res}
-        except DeviceException:
-            # Резервный запрос базовых свойств, если расширенные не поддерживаются
-            try:
-                res = self.device.send("get_prop", ["power", "bright"])
-                if isinstance(res, list) and len(res) >= 2:
-                    return {"status": "success", "power": res[0], "brightness": res[1]}
-                return {"status": "success", "raw": res}
-            except DeviceException as e:
-                return {"status": "error", "message": f"Ошибка MiIO: {e}"}
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
 
-if __name__ == "__main__":
-    print("Проверка модуля LampController...")
-    try:
-        lamp = LampController()
-        print(f"Подключение к лампе {lamp.ip}...")
-        status = lamp.get_status()
-        print("Статус лампы:", status)
-    except Exception as err:
-        print("Ошибка при инициализации лампы:", err)
+class LampManager:
+    """Менеджер для управления группой ламп по комнатам."""
+
+    def __init__(self):
+        self.lamps: Dict[str, SingleLamp] = {}
+
+        # Инициализация ламп из .env
+        configs = [
+            ("спальня", os.getenv("LAMP_BEDROOM_IP", "192.168.0.4"), os.getenv("LAMP_BEDROOM_TOKEN"), True),
+            ("кухня", os.getenv("LAMP_KITCHEN_IP", "192.168.0.7"), os.getenv("LAMP_KITCHEN_TOKEN"), False),
+            ("прихожая", os.getenv("LAMP_HALLWAY_IP", "192.168.0.8"), os.getenv("LAMP_HALLWAY_TOKEN"), False),
+            ("ванная", os.getenv("LAMP_BATHROOM_IP", "192.168.0.10"), os.getenv("LAMP_BATHROOM_TOKEN"), False),
+        ]
+
+        for name, ip, token, has_color in configs:
+            if ip and token and token != "ваш_токен":
+                try:
+                    self.lamps[name] = SingleLamp(name=name, ip=ip, token=token, has_color=has_color)
+                except Exception as e:
+                    print(f"[!] Ошибка подключения к лампе '{name}': {e}")
+
+    def resolve_targets(self, room: Optional[str]) -> List[SingleLamp]:
+        """Определяет список целевых ламп по названию комнаты или синониму."""
+        if not room:
+            # По умолчанию управляем спальней (где стоит ПК)
+            return [self.lamps["спальня"]] if "спальня" in self.lamps else list(self.lamps.values())
+
+        room_clean = room.strip().lower()
+
+        # Если запрошено "везде" / "все"
+        for alias in ROOM_ALIASES["все"]:
+            if alias in room_clean:
+                return list(self.lamps.values())
+
+        # Поиск по конкретным комнатам
+        for canonical_name, aliases in ROOM_ALIASES.items():
+            if any(a in room_clean for a in aliases):
+                if canonical_name in self.lamps:
+                    return [self.lamps[canonical_name]]
+
+        # Резервный поиск по прямому ключу
+        if room_clean in self.lamps:
+            return [self.lamps[room_clean]]
+
+        # Если комната не опознана, возвращаем спальню
+        return [self.lamps["спальня"]] if "спальня" in self.lamps else list(self.lamps.values())
+
+    def turn_on(self, room: Optional[str] = None) -> Dict[str, Any]:
+        targets = self.resolve_targets(room)
+        results = {lamp.name: lamp.turn_on() for lamp in targets}
+        return {"status": "success", "room": room or "спальня", "results": results}
+
+    def turn_off(self, room: Optional[str] = None) -> Dict[str, Any]:
+        targets = self.resolve_targets(room)
+        results = {lamp.name: lamp.turn_off() for lamp in targets}
+        return {"status": "success", "room": room or "спальня", "results": results}
+
+    def toggle(self, room: Optional[str] = None) -> Dict[str, Any]:
+        targets = self.resolve_targets(room)
+        results = {lamp.name: lamp.toggle() for lamp in targets}
+        return {"status": "success", "room": room or "спальня", "results": results}
+
+    def set_brightness(self, level: int, room: Optional[str] = None) -> Dict[str, Any]:
+        targets = self.resolve_targets(room)
+        results = {lamp.name: lamp.set_brightness(level) for lamp in targets}
+        return {"status": "success", "level": level, "room": room or "спальня", "results": results}
+
+    def set_color(self, color: str, room: Optional[str] = "спальня") -> Dict[str, Any]:
+        # Цвет есть только в спальне
+        target_room = "спальня" if not room or "все" in room else room
+        targets = [lamp for lamp in self.resolve_targets(target_room) if lamp.has_color]
+        if not targets:
+            return {"status": "error", "message": "Среди выбранных ламп нет устройств с поддержкой цвета."}
+        results = {lamp.name: lamp.set_color(color) for lamp in targets}
+        return {"status": "success", "color": color, "results": results}
+
+    def set_color_temp(self, kelvin: int, room: Optional[str] = "спальня") -> Dict[str, Any]:
+        target_room = "спальня" if not room or "все" in room else room
+        targets = [lamp for lamp in self.resolve_targets(target_room) if lamp.has_color]
+        if not targets:
+            return {"status": "error", "message": "Выбранная лампа не поддерживает смену температуры."}
+        results = {lamp.name: lamp.set_color_temp(kelvin) for lamp in targets}
+        return {"status": "success", "kelvin": kelvin, "results": results}
+
+    def get_status(self, room: Optional[str] = None) -> Dict[str, Any]:
+        targets = self.resolve_targets(room)
+        return {"status": "success", "statuses": {lamp.name: lamp.get_status() for lamp in targets}}
+
+
+# Для обратной совместимости
+LampController = LampManager
