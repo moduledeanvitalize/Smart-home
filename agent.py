@@ -6,8 +6,8 @@ import re
 from openai import OpenAI
 
 import config
-from device_controller import LampManager, PRESET_COLORS
-from pc_controller import PCController
+from controllers.device_controller import LampManager, PRESET_COLORS
+from controllers.pc_controller import PCController
 
 devices = LampManager()
 pc = PCController()
@@ -197,7 +197,7 @@ def chat(user_text: str) -> str:
     return answer
 
 def start_voice_mode():
-    from voice_controller import VoiceListener
+    from controllers.voice_controller import VoiceListener
     listener = VoiceListener(assistant_name=config.ASSISTANT_NAME.capitalize())
     listener.run(chat)
 

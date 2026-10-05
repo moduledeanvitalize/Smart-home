@@ -1,8 +1,7 @@
-import os
 import time
 
 from dotenv import load_dotenv
-from device_controller import LampController
+from controllers.device_controller import LampController
 
 # Загружаем переменные из .env, иначе os.getenv() вернет None
 load_dotenv()

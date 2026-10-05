@@ -6,7 +6,7 @@ from miio import Device
 from miio import Discovery
 from miio.exceptions import DeviceException
 
-from resolver import get_ip_by_mac
+from controllers.resolver import get_ip_by_mac
 
 ENV_PATH = os.path.join(os.path.dirname(__file__), ".env")
 load_dotenv(ENV_PATH, override=True)
