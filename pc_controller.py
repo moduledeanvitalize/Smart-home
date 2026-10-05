@@ -12,17 +12,17 @@ class PCController:
     """Управление мультимедиа на компьютере через стандартные медиа-клавиши."""
 
     @staticmethod
-    def _send_key(vk_code: int):
+    def _send_key(vk_code: int) -> bool:
         if sys.platform == "win32":
             ctypes.windll.user32.keybd_event(vk_code, 0, 0, 0)
             ctypes.windll.user32.keybd_event(vk_code, 0, KEYEVENTF_KEYUP, 0)
-        else:
-            # Заглушка для Linux при необходимости
-            pass
+            return True
+        return False
 
     def next_track(self) -> Dict[str, Any]:
         """Переключает на следующий трек."""
-        self._send_key(VK_MEDIA_NEXT_TRACK)
+        if not self._send_key(VK_MEDIA_NEXT_TRACK):
+            return {"status": "error", "message": "ОС не поддерживается"}
         return {"status": "success", "action": "next_track"}
 
     def prev_track(self) -> Dict[str, Any]:

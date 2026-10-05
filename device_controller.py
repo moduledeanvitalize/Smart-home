@@ -3,7 +3,10 @@ import re
 from typing import Dict, Any, Optional, Tuple, Union, List
 from dotenv import load_dotenv
 from miio import Device
+from miio import Discovery
 from miio.exceptions import DeviceException
+
+from resolver import get_ip_by_mac
 
 ENV_PATH = os.path.join(os.path.dirname(__file__), ".env")
 load_dotenv(ENV_PATH, override=True)
@@ -83,8 +86,9 @@ class SingleLamp:
 
     def set_rgb(self, red: int, green: int, blue: int) -> Dict[str, Any]:
         if not self.has_color:
-            return {"status": "error", "message": f"Лампа в '{self.name}' не поддерживает смену цвета."}
+            return {"status": "error", "message": f"Лампа '{self.name}' не поддерживает цвет."}
         try:
+            self.device.send("set_power", ["on"])  # Будим лампу, если выключена
             r, g, b = max(0, min(255, int(red))), max(0, min(255, int(green))), max(0, min(255, int(blue)))
             rgb_int = (r << 16) + (g << 8) + b
             res = self.device.send("set_rgb", [rgb_int])
@@ -110,7 +114,7 @@ class SingleLamp:
             return self.set_rgb(int(color[0]), int(color[1]), int(color[2]))
 
         if isinstance(color, str):
-            clean = color.strip().lower()
+            clean = color.strip().lower().replace("ё", "е")
             if clean in PRESET_COLORS:
                 return self.set_rgb(*PRESET_COLORS[clean])
             hex_match = re.match(r"^#?([0-9a-f]{6})$", clean)
@@ -144,18 +148,25 @@ class LampManager:
 
         # Инициализация ламп из .env
         configs = [
-            ("спальня", os.getenv("LAMP_BEDROOM_IP", "192.168.0.4"), os.getenv("LAMP_BEDROOM_TOKEN"), True),
-            ("кухня", os.getenv("LAMP_KITCHEN_IP", "192.168.0.7"), os.getenv("LAMP_KITCHEN_TOKEN"), False),
-            ("прихожая", os.getenv("LAMP_HALLWAY_IP", "192.168.0.8"), os.getenv("LAMP_HALLWAY_TOKEN"), False),
-            ("ванная", os.getenv("LAMP_BATHROOM_IP", "192.168.0.10"), os.getenv("LAMP_BATHROOM_TOKEN"), False),
+            ("спальня", os.getenv("LAMP_BEDROOM_MAC"), os.getenv("LAMP_BEDROOM_TOKEN"), True),
+            ("кухня", os.getenv("LAMP_KITCHEN_MAC"), os.getenv("LAMP_KITCHEN_TOKEN"), False),
+            ("прихожая", os.getenv("LAMP_HALLWAY_MAC"), os.getenv("LAMP_HALLWAY_TOKEN"), False),
+            ("ванная", os.getenv("LAMP_BATHROOM_MAC"), os.getenv("LAMP_BATHROOM_TOKEN"), False),
         ]
 
-        for name, ip, token, has_color in configs:
-            if ip and token and token != "ваш_токен":
-                try:
-                    self.lamps[name] = SingleLamp(name=name, ip=ip, token=token, has_color=has_color)
-                except Exception as e:
-                    print(f"[!] Ошибка подключения к лампе '{name}': {e}")
+        for name, mac, token, has_color in configs:
+            if mac and token:
+                # Находим актуальный IP по MAC-адресу
+                current_ip = get_ip_by_mac(mac)
+                
+                if current_ip:
+                    try:
+                        self.lamps[name] = SingleLamp(name=name, ip=current_ip, token=token, has_color=has_color)
+                        print(f"[+] Лампа '{name}' найдена на {current_ip}")
+                    except Exception as e:
+                        print(f"[!] Ошибка подключения к лампе '{name}': {e}")
+                else:
+                    print(f"[-] Не удалось найти лапму '{name}' с MAC {mac} в сети.")
 
     def resolve_targets(self, room: Optional[str]) -> List[SingleLamp]:
         """Определяет список целевых ламп по названию комнаты или синониму."""

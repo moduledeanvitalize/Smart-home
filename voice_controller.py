@@ -13,6 +13,8 @@ import numpy as np
 import sounddevice as sd
 import speech_recognition as sr
 import edge_tts
+import hashlib
+import config
 
 # Загрузка конфигурации из .env
 ENV_PATH = os.path.join(os.path.dirname(__file__), ".env")
@@ -73,8 +75,15 @@ async def _synthesize_edge_tts(text: str, output_path: str, voice: str = VOICE_N
     communicate = edge_tts.Communicate(text, voice=voice)
     await communicate.save(output_path)
 
+def _tts_cache_path(text: str) -> str:
+    """Генерирует уникальный путь к mp3 на основе хэша текста."""
+    text_clean = text.strip().lower()
+    text_hash = hashlib.md5(text_clean.encode("utf-8")).hexdigest()[:10]
+    slug = re.sub(r"[^\wа-яa-z]+", "_", text_clean, flags=re.UNICODE).strip("_")[:25]
+    return os.path.join(config.SOUNDS_DIR, f"reply_{slug}_{text_hash}.mp3")
 
-def speak(text: str, voice: str = VOICE_NAME) -> None:
+
+def speak(text: str, voice: str = config.VOICE_NAME) -> None:
     """
     Озвучивает ответ ассистента с защитой от ошибок edge-tts и нулевой задержкой для частых фраз.
     """
@@ -82,6 +91,21 @@ def speak(text: str, voice: str = VOICE_NAME) -> None:
         return
 
     clean = text.strip().lower()
+
+    cache_file = _tts_cache_path(text)
+
+    # Мгновенное оффлайн-воспроизведение из кэша
+    if os.path.exists(cache_file):
+        play_audio(cache_file)
+        return
+
+    # Синтез и сохранение в кэш
+    try:
+        asyncio.run(asyncio.wait_for(_synthesize_edge_tts(text, cache_file, voice=voice), timeout=3.0))
+        play_audio(cache_file)
+    except Exception as e:
+        print(f"[!] Синтез речи пропущен ({e})")
+        play_done_chime()
 
     # Быстрый оффлайн-ответ для "Слушаю"
     if clean in ("слушаю", "слушаю!", "слушаю..."):
