@@ -3,13 +3,14 @@ import subprocess
 import socket
 import re
 from concurrent.futures import ThreadPoolExecutor
+import time
 
 def _ping_ip(ip: str):
     """Посылает короткий пакет на порт устройства, чтобы ОС добавила его в ARP."""
     try:
         # Пробуем стукнуться в miio порт 54321 или yeelight 55443
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.settimeout(0.1)
+            s.settimeout(0.1) # Ждем всего 0.1 секунды
             s.sendto(b"", (ip, 54321))
     except Exception:
         pass
@@ -19,6 +20,9 @@ def warm_up_arp(subnet_prefix="192.168.0"):
     ips = [f"{subnet_prefix}.{i}" for i in range(1, 255)]
     with ThreadPoolExecutor(max_workers=50) as executor:
         executor.map(_ping_ip, ips)
+
+    # Дать ОС 0.2-0.3 секунды, чтобы собрать запоздавшие ARP-ответы в кэш
+    time.sleep(0.2)
 
 def get_ip_by_mac(target_mac: str, subnet_prefix="192.168.0") -> str | None:
     # Приводим искомый MAC к единому виду: строчные буквы, без ведущих нулей в октетах (на Windows)

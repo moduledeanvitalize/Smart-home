@@ -1,15 +1,15 @@
 import time
 
 from dotenv import load_dotenv
-from controllers.device_controller import LampController
-
+from controllers.device_controller import LampManager
+    
 # Загружаем переменные из .env, иначе os.getenv() вернет None
 load_dotenv()
 
 def main():
     print("=== Тестирование управления лампой (включая цвет) ===")
     try:
-        manager = LampController()
+        manager = LampManager()
         if "спальня" not in manager.lamps:
             print("[-] Лампа спальни не найдена! Проверьте LAMP_BEDROOM_TOKEN в .env файле.")
             return
