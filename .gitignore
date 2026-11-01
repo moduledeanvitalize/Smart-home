@@ -2,3 +2,4 @@ __pycache__/
 .venv/
 .env
 ip_cache.json
+user_memory.json

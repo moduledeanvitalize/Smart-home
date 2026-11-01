@@ -4,6 +4,7 @@ import json
 import os
 import re
 from openai import OpenAI
+import memory
 
 import config
 from controllers.device_controller import LampManager, PRESET_COLORS
@@ -36,7 +37,25 @@ TOOLS = [
     {"type": "function", "function": {"name": "next_track", "description": "Следующий трек на ПК.", "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "prev_track", "description": "Предыдущий трек на ПК.", "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "play_pause_track", "description": "Пауза/плей музыки на ПК.", "parameters": {"type": "object", "properties": {}}}},
+    {
+        "type": "function",
+        "function": {
+            "name": "remember_user_preference",
+            "description": "Сохраняет предпочтения, привычки или правила пользователя, когда он просит что-то запомнить.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "fact": {
+                        "type": "string",
+                        "description": "Краткая формулировка факта от 3-го лица (например: 'Любит теплый свет в спальне по вечерам').",
+                    }
+                },
+                "required": ["fact"],
+            },
+        },
+    },
 ]
+
 
 # Диспетчер инструментов с поддержкой комнат
 TOOL_HANDLERS = {
@@ -50,6 +69,7 @@ TOOL_HANDLERS = {
     "next_track": lambda a: pc.next_track(),
     "prev_track": lambda a: pc.prev_track(),
     "play_pause_track": lambda a: pc.play_pause(),
+    "remember_user_preference": lambda a: memory.save_fact(a.get("fact", "")),
 }
 
 def execute_tool(name: str, arguments: dict) -> dict:
@@ -75,6 +95,9 @@ def format_tool_response(name: str, arguments: dict, result: dict) -> str:
     if name == "next_track": return "Включен следующий трек."
     if name == "prev_track": return "Включен предыдущий трек."
     if name == "play_pause_track": return "Воспроизведение переключено."
+    if name == "remember_user_preference":
+        # Если память сохранена, сразу возвращаем текст для озвучки Русланом
+        return result if isinstance(result, str) else "Запомнил."
     return "Действие выполнено."
 
 def parse_room_from_text(cmd: str) -> str:
@@ -139,14 +162,24 @@ def try_fast_intent(text: str) -> str | None:
 
     return None
 
-SYSTEM_PROMPT = f"""Ты — голосовой ассистент '{config.ASSISTANT_NAME.capitalize()}'.
-В твоем распоряжении:
-- Лампа 'спальня': цветная (вкл/выкл, яркость, цвет, температура).
-- Лампы 'кухня', 'прихожая', 'ванная': монохромные (только вкл/выкл, яркость).
-Если комната не названа, по умолчанию 'спальня'. Если 'везде' — 'все'.
-Всегда вызывай нужный инструмент. Отвечай кратко — 1 предложение."""
+def build_system_prompt() -> str:
+  memories = memory.load_memory()
+  memory_block = ""
+  if memories:
+    formatted_notes = "\n".join(f"- {note}" for note in memories)
+    memory_block = f"\n\nФАКТЫ И ПРЕДПОЧТЕНИЯ ПОЛЬЗОВАТЕЛЯ:\n{formatted_notes}"
 
-conversation_history = [{"role": "system", "content": SYSTEM_PROMPT}]
+  return f"""Ты — домашний голосовой ассистент по имени Ишак.
+Твой характер: ироничный, сообразительный, полезный друг.
+
+ПРАВИЛА РАБОТЫ:
+1. Если запрос связан со светом, музыкой или ПК — обязательно вызывай нужные tools.
+2. Если пользователь говорит запомнить какую-то деталь о себе, привычках или настройках — вызывай инструмент 'remember_user_preference'.
+3. Формулируй ответы лаконично (1–3 предложения для озвучки голосом).{memory_block}
+"""
+conversation_history = [{"role": "system", "content": build_system_prompt()}]
+
+
 
 def trim_history():
     global conversation_history
@@ -161,6 +194,9 @@ def chat(user_text: str) -> str:
         conversation_history.append({"role": "assistant", "content": fast_reply})
         trim_history()
         return fast_reply
+
+    # Обновляем системный промпт актуальными фактами из user_memory.json
+    conversation_history[0]["content"] = build_system_prompt()
 
     conversation_history.append({"role": "user", "content": user_text})
     trim_history()

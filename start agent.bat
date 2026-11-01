@@ -6,7 +6,7 @@ chcp 65001 > nul
 cd /d "%~dp0"
 
 :: Запуск голосового ассистента через совместимый Python 3.13
-py agent.py
+".venv\Scripts\python.exe" agent.py
 
 :: Если произойдет ошибка, окно не закроется мгновенно
 pause
