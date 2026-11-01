@@ -10,7 +10,7 @@ from typing import Callable, Optional, Tuple
 from dotenv import load_dotenv
 import numpy as np
 import onnxruntime as ort
-from piper import PiperVoice
+from piper import PiperVoice # type: ignore
 import sounddevice as sd
 import speech_recognition as sr
 
@@ -183,7 +183,7 @@ class VoiceListener:
         sample_rate: int = 16000,
         chunk_size: int = 512,
         silence_chunks_needed: int = 25,
-        max_duration: float = 15.0,
+        max_duration: float = 30.0,
         min_speech_duration: float = 0.35,
     ):
         self.assistant_name = assistant_name.strip().lower()

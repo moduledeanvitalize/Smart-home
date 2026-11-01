@@ -1,10 +1,12 @@
+import os
 import time
 
 from dotenv import load_dotenv
-from controllers.device_controller import LampManager
-    
-# Загружаем переменные из .env, иначе os.getenv() вернет None
-load_dotenv()
+from controllers.device_con.LampManager import LampManager
+
+BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
+
 
 def main():
     print("=== Тестирование управления лампой (включая цвет) ===")
@@ -14,7 +16,6 @@ def main():
             print("[-] Лампа спальни не найдена! Проверьте LAMP_BEDROOM_TOKEN в .env файле.")
             return
 
-        # Вот ваш экземпляр SingleLamp:
         lamp = manager.lamps["спальня"]
         print(f"Подключение к лампе {lamp.ip}...")
 
@@ -51,7 +52,6 @@ def main():
         status = lamp.get_status()
         print("Текущий статус:", status)
 
-        # Восстановление исходной температуры/состояния если было известно
         if initial_status.get("color_temp"):
             lamp.set_color_temp(initial_status["color_temp"])
         if initial_status.get("brightness"):
@@ -62,6 +62,7 @@ def main():
         print("\n[+] Все тесты управления цветом успешно пройдены!")
     except Exception as e:
         print(f"[-] Ошибка во время теста: {e}")
+
 
 if __name__ == "__main__":
     main()
