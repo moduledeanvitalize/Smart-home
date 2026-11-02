@@ -217,16 +217,7 @@ def chat(user_text: str) -> str:
   conversation_history.append({"role": "user", "content": user_text})
   trim_history()
 
-  logger.info("Отправка запроса в LLM...")
-  debug_payload = {
-      "model": getattr(config, "LLM_MODEL", "deepseek-chat"),
-      "messages": conversation_history,
-      "tools": TOOLS,
-  }
-  logger.debug(
-      "=== ИСХОДЯЩИЙ PAYLOAD ===\n%s",
-      json.dumps(debug_payload, ensure_ascii=False, indent=2),
-  )
+  logger.info("Отправка запроса 1 в LLM (выбор инструментов)...")
 
   try:
     response = client.chat.completions.create(
@@ -236,54 +227,102 @@ def chat(user_text: str) -> str:
         tool_choice="auto",
     )
 
+    # Лог расхода токенов и кэша для Запроса 1
     usage = response.usage
     if usage:
       prompt_tokens = getattr(usage, "prompt_tokens", 0)
       completion_tokens = getattr(usage, "completion_tokens", 0)
       details = getattr(usage, "prompt_tokens_details", None)
-      cached_tokens = getattr(details, "cached_tokens", 0) if details else 0
-      if not cached_tokens:
-        cached_tokens = getattr(usage, "prompt_cache_hit_tokens", 0)
+      cached = getattr(details, "cached_tokens", 0) if details else 0
+      if not cached:
+        cached = getattr(usage, "prompt_cache_hit_tokens", 0)
 
       logger.info(
-          "Токены: Ввод=%d | Кэш=%d (%.1f%%) | Вывод=%d",
+          "[Шаг 1] Токены: Ввод=%d | Кэш=%d (%.1f%%) | Вывод=%d",
           prompt_tokens,
-          cached_tokens,
-          (cached_tokens / prompt_tokens * 100) if prompt_tokens else 0,
+          cached,
+          (cached / prompt_tokens * 100) if prompt_tokens else 0,
           completion_tokens,
       )
-
-    logger.debug(
-        "=== ОТВЕТ МОДЕЛИ ===\n%s",
-        response.choices[0].message.model_dump_json(),
-    )
-
+      
   except Exception as e:
     logger.error("Ошибка при обращении к LLM: %s", e)
-    print(f"[!] Ошибка LLM: {e}")
     return "Не удалось связаться с сервером."
 
   msg = response.choices[0].message
-  if msg.tool_calls:
-    responses = []
-    for tool_call in msg.tool_calls:
-      try:
-        fn_args = json.loads(tool_call.function.arguments or "{}")
-      except Exception:
-        fn_args = {}
-      tool_res = execute_tool(tool_call.function.name, fn_args)
-      responses.append(
-          format_tool_response(tool_call.function.name, fn_args, tool_res)
-      )
-    answer = " ".join(responses)
+
+  # Если модель ничего вызывать не захотела, а сразу ответила
+  if not msg.tool_calls:
+    answer = msg.content or "Слушаю."
     conversation_history.append({"role": "assistant", "content": answer})
     trim_history()
     return answer
 
-  answer = msg.content or "Выполнено."
-  conversation_history.append({"role": "assistant", "content": answer})
-  trim_history()
-  return answer
+  # Модель вернула вызовы инструментов
+  conversation_history.append(msg.model_dump(exclude_unset=True))
+
+  executed_summaries = []
+  for tool_call in msg.tool_calls:
+    fn_name = tool_call.function.name
+    try:
+      fn_args = json.loads(tool_call.function.arguments or "{}")
+    except Exception:
+      fn_args = {}
+
+    logger.info("Выполняю инструмент: %s с аргументами %s", fn_name, fn_args)
+    tool_result = execute_tool(fn_name, fn_args)
+
+    conversation_history.append({
+        "role": "tool",
+        "tool_call_id": tool_call.id,
+        "content": (
+            json.dumps(tool_result, ensure_ascii=False)
+            if isinstance(tool_result, (dict, list))
+            else str(tool_result)
+        ),
+    })
+
+    executed_summaries.append(
+        format_tool_response(fn_name, fn_args, tool_result)
+    )
+
+  # --- ЗАПРОС 2: Отправка результатов работы тулсов обратно ---
+  logger.info("Отправка запроса 2 в LLM (подведение итогов)...")
+  try:
+    final_response = client.chat.completions.create(
+        model=getattr(config, "LLM_MODEL", "deepseek-chat"),
+        messages=conversation_history,
+    )
+
+    usage2 = final_response.usage
+    if usage2:
+      prompt_tokens2 = getattr(usage2, "prompt_tokens", 0)
+      completion_tokens2 = getattr(usage2, "completion_tokens", 0)
+      details2 = getattr(usage2, "prompt_tokens_details", None)
+      cached2 = getattr(details2, "cached_tokens", 0) if details2 else 0
+      if not cached2:
+        cached2 = getattr(usage2, "prompt_cache_hit_tokens", 0)
+
+      logger.info(
+          "[Шаг 2] Токены: Ввод=%d | Кэш=%d (%.1f%%) | Вывод=%d",
+          prompt_tokens2,
+          cached2,
+          (cached2 / prompt_tokens2 * 100) if prompt_tokens2 else 0,
+          completion_tokens2,
+      )
+
+    final_text = final_response.choices[0].message.content or "Сделано."
+    conversation_history.append({"role": "assistant", "content": final_text})
+    trim_history()
+    return final_text
+  except Exception as e:
+    logger.error("Ошибка во 2-м запросе: %s", e)
+    fallback_answer = " ".join(executed_summaries)
+    conversation_history.append(
+        {"role": "assistant", "content": fallback_answer}
+    )
+    trim_history()
+    return fallback_answer
 
 
 def start_voice_mode():
