@@ -7,10 +7,10 @@ from openai import OpenAI
 
 import config
 from controllers.device_con.LampManager import PRESET_COLORS
-import memory
-import tools_impl  # Загружает все функции и регистрирует их
-from tools_registry import TOOLS_SCHEMA as TOOLS
-from tools_registry import execute_tool, format_tool_response
+from core import memory
+from core import tools_impl  # Загружает все функции и регистрирует их
+from core.tools_registry import TOOLS_SCHEMA as TOOLS
+from core.tools_registry import execute_tool, format_tool_response
 
 # Настройка логирования
 os.makedirs("logs", exist_ok=True)

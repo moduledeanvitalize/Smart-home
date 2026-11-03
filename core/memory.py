@@ -1,7 +1,8 @@
 import json
 import os
 
-MEMORY_FILE = os.path.join(os.path.dirname(__file__), "user_memory.json")
+BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+MEMORY_FILE = os.path.join(BASE_DIR, "data", "user_memory.json")
 
 
 def load_memory() -> list[str]:

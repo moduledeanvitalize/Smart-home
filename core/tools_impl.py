@@ -1,7 +1,8 @@
 from controllers.device_con.LampManager import LampManager
 from controllers.pc_controller import PCController
-import memory
-from tools_registry import register_tool
+from core import memory
+from core import scenarios_manager
+from core.tools_registry import execute_tool, register_tool
 
 devices = LampManager()
 pc = PCController()
@@ -261,3 +262,78 @@ def open_app(app_name: str):
 )
 def remember_user_preference(fact: str):
   return memory.save_fact(fact)
+
+# ==========================================
+# 4. СЦЕНАРИИ
+# ==========================================
+
+
+@register_tool(
+    name="run_scenario",
+    description=(
+        "Запустить готовый сценарий автоматизации по имени (например: 'кино',"
+        " 'спать', 'вечеринка')."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "Название сценария на русском",
+            }
+        },
+        "required": ["name"],
+    },
+    response_template=lambda a, r: (
+        f"Сценарий '{a.get('name')}' выполнен."
+        if r.get("status") == "success"
+        else r.get("message")
+    ),
+)
+def tool_run_scenario(name: str):
+  # Передаем сам execute_tool внутрь, чтобы сценарий мог вызывать любые функции
+  return scenarios_manager.run_scenario(name, execute_tool)
+
+
+@register_tool(
+    name="save_scenario",
+    description=(
+        "Создать или сохранить новый сценарий из цепочки действий, когда"
+        " пользователь прямо просит настроить или запомнить сценарий."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "Краткое имя сценария (например: 'уборка')",
+            },
+            "steps": {
+                "type": "array",
+                "description": "Список шагов сценария",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "tool": {
+                            "type": "string",
+                            "description": "Имя инструмента",
+                        },
+                        "args": {
+                            "type": "object",
+                            "description": "Параметры инструмента",
+                        },
+                    },
+                    "required": ["tool"],
+                },
+            },
+        },
+        "required": ["name", "steps"],
+    },
+    response_template=lambda a, r: (
+        f"Сценарий '{a.get('name')}' успешно сохранён."
+        if r.get("status") == "success"
+        else r.get("message")
+    ),
+)
+def tool_save_scenario(name: str, steps: list[dict]):
+  return scenarios_manager.add_scenario(name, steps)

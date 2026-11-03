@@ -2,5 +2,6 @@ __pycache__/
 .venv/
 .env
 ip_cache.json
-user_memory.json
+data/user_memory.json
+data/scenarios.json
 logs/
