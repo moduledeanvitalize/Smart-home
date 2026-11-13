@@ -1,10 +1,6 @@
 import os
-import re
 from typing import Dict, Any, Optional, Tuple, Union, List
 from dotenv import load_dotenv
-from miio import Device
-from miio import Discovery
-from miio.exceptions import DeviceException
 from typing import Optional
 
 from controllers.resolver import resolve_all_ips

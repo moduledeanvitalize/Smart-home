@@ -1,9 +1,11 @@
 import argparse
+import time
 import json
 import logging
 import os
 import re
 from openai import OpenAI
+
 
 import config
 from controllers.device_con.LampManager import PRESET_COLORS
@@ -81,6 +83,10 @@ _COLOR_RE = re.compile(
     + r")\b"
 )
 
+_BRIGHTNESS_RE = re.compile(
+    r"(?:яркость\w*\s*(?:на|до)?\s*(\d{1,3})|свет\w*\s+на\s+(\d{1,3})\s*%?)"
+)
+
 
 def try_fast_intent(text: str) -> str | None:
   cmd = text.strip().lower().replace("ё", "е")
@@ -91,91 +97,49 @@ def try_fast_intent(text: str) -> str | None:
   room = parse_room_from_text(cmd)
 
   # Мультимедиа и громкость
-  if any(
-      w in cmd
-      for w in (
-          "следующий трек",
-          "следующую песню",
-          "переключи трек",
-          "скипни трек",
-      )
-  ):
-    return format_tool_response("next_track", {}, execute_tool("next_track", {}))
+  if any(w in cmd for w in ("следующий трек", "следующую песню", "переключи трек", "скипни трек")):
+      return format_tool_response("control_media", {"action": "next"}, execute_tool("control_media", {"action": "next"}))
+
   if any(w in cmd for w in ("предыдущий трек", "предыдущую песню", "назад трек")):
-    return format_tool_response("prev_track", {}, execute_tool("prev_track", {}))
-  if any(
-      w in cmd
-      for w in (
-          "поставь на паузу",
-          "пауза",
-          "продолжи музыку",
-          "включи музыку",
-          "стоп музыка",
-      )
-  ):
-    return format_tool_response(
-        "play_pause_track", {}, execute_tool("play_pause_track", {})
-    )
+      return format_tool_response("control_media", {"action": "prev"}, execute_tool("control_media", {"action": "prev"}))
+
+  if any(w in cmd for w in ("поставь на паузу", "пауза", "продолжи музыку", "включи музыку", "стоп музыка")):
+      return format_tool_response("control_media", {"action": "play_pause"}, execute_tool("control_media", {"action": "play_pause"}))
+
   if any(w in cmd for w in ("погромче", "прибавь звук", "громче")):
-    return format_tool_response(
-        "volume_up", {"steps": 5}, execute_tool("volume_up", {"steps": 5})
-    )
+      return format_tool_response("control_media", {"action": "volume_up", "steps": 5}, execute_tool("control_media", {"action": "volume_up", "steps": 5}))
+
   if any(w in cmd for w in ("потише", "убавь звук", "тише")):
-    return format_tool_response(
-        "volume_down", {"steps": 5}, execute_tool("volume_down", {"steps": 5})
-    )
+      return format_tool_response("control_media", {"action": "volume_down", "steps": 5}, execute_tool("control_media", {"action": "volume_down", "steps": 5}))
+
   if any(w in cmd for w in ("заглуши звук", "без звука", "выключи звук")):
-    return format_tool_response(
-        "volume_mute", {}, execute_tool("volume_mute", {})
-    )
+      return format_tool_response("control_media", {"action": "mute"}, execute_tool("control_media", {"action": "mute"}))
 
   # Лампы
-  if any(
-      v in cmd
-      for v in (
-          "включи свет",
-          "вруби свет",
-          "зажги свет",
-          "включи лампу",
-          "включи все",
-          "включи везде",
-      )
-  ):
-    res = execute_tool("turn_on_lamp", {"room": room})
-    return format_tool_response("turn_on_lamp", {"room": room}, res)
+  if any(v in cmd for v in ("включи свет", "вруби свет", "зажги свет", "включи лампу", "включи все", "включи везде")):
+    return format_tool_response("lamp_control", {"action": "on", "room": room}, execute_tool("lamp_control", {"action": "on", "room": room}))
 
-  if any(
-      v in cmd
-      for v in (
-          "выключи свет",
-          "выруби свет",
-          "погаси свет",
-          "потуши свет",
-          "выключи лампу",
-          "выключи все",
-          "выключи везде",
-      )
-  ):
-    res = execute_tool("turn_off_lamp", {"room": room})
-    return format_tool_response("turn_off_lamp", {"room": room}, res)
+  if any(v in cmd for v in ("выключи свет", "выруби свет", "погаси свет", "потуши свет", "выключи лампу", "выключи все", "выключи везде")):
+    return format_tool_response("lamp_control", {"action": "off", "room": room}, execute_tool("lamp_control", {"action": "off", "room": room}))
 
-  if "переключи свет" in cmd:
-    res = execute_tool("toggle_lamp", {"room": room})
-    return format_tool_response("toggle_lamp", {"room": room}, res)
+  brightness_match = _BRIGHTNESS_RE.search(cmd)
+  if brightness_match:
+    raw_value = brightness_match.group(1) or brightness_match.group(2)
+    level = max(1, min(100, int(raw_value)))
+    args = {"action": "brightness", "level": level, "room": room}
+    return format_tool_response("lamp_control", args, execute_tool("lamp_control", args))
 
   for pattern, kelvin in TEMP_RULES:
     if pattern.search(cmd):
-      res = execute_tool(
-          "set_lamp_color_temp", {"kelvin": kelvin, "room": "спальня"}
-      )
-      return format_tool_response("set_lamp_color_temp", {"kelvin": kelvin}, res)
+      return format_tool_response("lamp_control", {"action": "color_temp", "kelvin": kelvin}, execute_tool("lamp_control", {"action": "color_temp", "kelvin": kelvin}))
 
   color_match = _COLOR_RE.search(cmd)
   if color_match:
     color_val = color_match.group(1)
-    res = execute_tool("set_lamp_color", {"color": color_val})
-    return format_tool_response("set_lamp_color", {"color": color_val}, res)
-
+    res = tools_impl.devices.set_color(color_val, room)
+    if res.get("status") != "success":
+      return res.get("message", "Не удалось изменить цвет лампы.")
+    return f"Свет в {room} установлен на цвет {color_val}."
   return None
 
 
@@ -209,13 +173,13 @@ def trim_history():
 def chat(user_text: str) -> str:
   fast_reply = try_fast_intent(user_text)
   if fast_reply is not None:
-    conversation_history.append({"role": "user", "content": user_text})
+    conversation_history.append({"role": "user", "content": f"[{time.strftime('%H:%M')}] {user_text}"})
     conversation_history.append({"role": "assistant", "content": fast_reply})
     trim_history()
     return fast_reply
 
   conversation_history[0]["content"] = build_system_prompt()
-  conversation_history.append({"role": "user", "content": user_text})
+  conversation_history.append({"role": "user", "content": f"[{time.strftime('%H:%M')}] {user_text}"})
   trim_history()
 
   logger.info("Отправка запроса 1 в LLM (выбор инструментов)...")

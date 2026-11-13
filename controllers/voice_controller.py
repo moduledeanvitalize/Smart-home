@@ -1,9 +1,7 @@
 ﻿from email.mime import text
-import io
 import os
 import re
 import time
-import wave
 import winsound
 from collections import deque
 from typing import Callable, Optional, Tuple
@@ -15,7 +13,7 @@ from piper import PiperVoice # type: ignore
 import sounddevice as sd
 import speech_recognition as sr
 from comtypes import CLSCTX_ALL
-from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume, ISimpleAudioVolume
+from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume
 
 # Регистрируем пути к CUDA/cuDNN DLL для Windows до вызова Whisper
 try:
@@ -384,7 +382,7 @@ class VoiceListener:
                 log_prob_threshold=-1.0,
                 compression_ratio_threshold=2.4,
                 initial_prompt=(
-                    "Ишак, свет, музыку, спальня, кухня. "
+                    "Ишак. "
                     "Dota, CS, Steam, YouTube, Discord, Shadowraze, рейз, койл, zxc, лаг, пинг, фпс, хп, мана, ульта, ультимейт, ульт, чмо. "
                     "Telegram, Spotify, Gran Turismo, Skyline, Сидни Кросби, ЦСКА."
                 ),

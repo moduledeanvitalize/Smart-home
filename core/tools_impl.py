@@ -25,191 +25,112 @@ def _loc(room: str | None) -> str:
 # 1. УПРАВЛЕНИЕ ЛАМПАМИ
 # ==========================================
 
+LAMPS_RESPONSES = {
+    "on": "Свет включен.",
+    "off": "Свет выключен.",
+    "brightness": "Яркость установлена.",
+    "rgb": "Цвет изменен.",
+    "color_temp": "Температура света установлена.",
+    "status": "Статус лампы получен.",
+}
+
+def _format_lamp_reply(action: dict, result: dict) -> str:
+    """Форматирует ответ для действий с лампами."""
+    if result.get("status") != "success":
+        return result.get("message", "Не удалось выполнить действие.")
+
+    # проверка на обесточенность
+    results = result.get("results", {})
+    offline = [room for room, res in results.items() if res.get("status") == "offline"]
+    if offline:
+        return f"Лампа в комнате {', '.join(offline)} обесточена. Проверь выключатель."
+
+    return LAMPS_RESPONSES.get(action.get("action"), "Выполнено.")
 
 @register_tool(
-    name="turn_on_lamp",
-    description="Включить свет.",
-    parameters={"type": "object", "properties": {"room": ROOM_PARAM}},
-    response_template=lambda a, r: f"Свет{_loc(a.get('room'))} включен.",
-)
-def turn_on_lamp(room: str = "спальня"):
-  return devices.turn_on(room)
-
-
-@register_tool(
-    name="turn_off_lamp",
-    description="Выключить свет.",
-    parameters={"type": "object", "properties": {"room": ROOM_PARAM}},
-    response_template=lambda a, r: f"Свет{_loc(a.get('room'))} выключен.",
-)
-def turn_off_lamp(room: str = "спальня"):
-  return devices.turn_off(room)
-
-
-@register_tool(
-    name="toggle_lamp",
-    description="Переключить состояние света (вкл/выкл).",
-    parameters={"type": "object", "properties": {"room": ROOM_PARAM}},
-    response_template=lambda a, r: f"Свет{_loc(a.get('room'))} переключен.",
-)
-def toggle_lamp(room: str = "спальня"):
-  return devices.toggle(room)
-
-
-@register_tool(
-    name="set_lamp_brightness",
-    description="Установить яркость света (1-100%).",
-    parameters={
-        "type": "object",
-        "properties": {"level": {"type": "integer"}, "room": ROOM_PARAM},
-        "required": ["level"],
-    },
-    response_template=lambda a, r: (
-        f"Яркость{_loc(a.get('room'))} установлена на {a.get('level', 100)}%."
-    ),
-)
-def set_lamp_brightness(level: int, room: str = "спальня"):
-  return devices.set_brightness(level, room)
-
-
-@register_tool(
-    name="set_lamp_rgb",
-    description=(
-        "Установить цвет лампы через компоненты RGB (0-255). Модель сама"
-        " подбирает числа (только спальня)."
-    ),
+    name="lamp_control",
+    description="Управление лампами(вкл/выкл/яркость/цвет/статус/температура).",
     parameters={
         "type": "object",
         "properties": {
-            "r": {"type": "integer"},
-            "g": {"type": "integer"},
-            "b": {"type": "integer"},
+            "action": {"type": "string", 
+            "enum": ["on", "off", "brightness", "rgb", "color_temp", "status"]},
             "room": ROOM_PARAM,
+            "level": {"type": "integer", "description": "Яркость 1-100% (только для brightness)"},
+            "r": {"type": "integer", "description": "Красный (0-255) для action='rgb'"},
+            "g": {"type": "integer", "description": "Зеленый (0-255) для action='rgb'"},
+            "b": {"type": "integer", "description": "Синий (0-255) для action='rgb'"},
+            "kelvin": {"type": "integer", "description": "Цветовая температура 1700-6500K (только для color_temp в спальне)"},
         },
-        "required": ["r", "g", "b"],
+        "required": ["action"],
     },
-    response_template=lambda a, r: (
-        f"Цвет в спальне изменен на RGB ({a.get('r')}, {a.get('g')},"
-        f" {a.get('b')})."
-    ),
+    response_template=_format_lamp_reply,
 )
-def set_lamp_rgb(
-    r: int = 255, g: int = 255, b: int = 255, room: str = "спальня"
-):
-  return devices.set_rgb(r, g, b, room)
 
-
-@register_tool(
-    name="set_lamp_color",
-    description="Установить цвет по названию (для быстрых команд).",
-    parameters={
-        "type": "object",
-        "properties": {"color": {"type": "string"}, "room": ROOM_PARAM},
-        "required": ["color"],
-    },
-    response_template=lambda a, r: (
-        f"Цвет в спальне изменен на {a.get('color')}."
-    ),
-)
-def set_lamp_color(color: str = "белый", room: str = "спальня"):
-  return devices.set_color(color, room)
-
-
-@register_tool(
-    name="set_lamp_color_temp",
-    description="Цветовая температура 1700-6500K (только спальня).",
-    parameters={
-        "type": "object",
-        "properties": {"kelvin": {"type": "integer"}, "room": ROOM_PARAM},
-        "required": ["kelvin"],
-    },
-    response_template=lambda a, r: (
-        f"Температура света установлена на {a.get('kelvin')}K."
-    ),
-)
-def set_lamp_color_temp(kelvin: int = 4000, room: str = "спальня"):
-  return devices.set_color_temp(kelvin, room)
-
-
-@register_tool(
-    name="get_lamp_status",
-    description="Проверить статус ламп.",
-    parameters={"type": "object", "properties": {"room": ROOM_PARAM}},
-    response_template="Статус ламп получен.",
-)
-def get_lamp_status(room: str = "спальня"):
-  return devices.get_status(room)
+def lamp_control(action: str, room: str = "спальня", level: int = 100, r: int = 255, g: int = 255, b: int = 255, kelvin: int = 4000):
+    if action == "on":
+        return devices.turn_on(room)
+    elif action == "off":
+        return devices.turn_off(room)
+    elif action == "brightness":
+        return devices.set_brightness(level, room)
+    elif action == "rgb":
+        return devices.set_rgb(r, g, b, room)
+    elif action == "color_temp":
+        return devices.set_color_temp(kelvin, room)
+    elif action == "status":
+        return devices.get_status(room)
+    else:
+        return {"status": "error", "message": f"Неизвестное действие лампы: {action}"}
 
 
 # ==========================================
 # 2. УПРАВЛЕНИЕ ПК И МУЛЬТИМЕДИА
 # ==========================================
 
-
-@register_tool(
-    name="next_track",
-    description="Следующий трек в плеере на ПК.",
-    parameters={"type": "object", "properties": {}},
-    response_template="Включен следующий трек.",
-)
-def next_track():
-  return pc.next_track()
-
-
-@register_tool(
-    name="prev_track",
-    description="Предыдущий трек в плеере на ПК.",
-    parameters={"type": "object", "properties": {}},
-    response_template="Включен предыдущий трек.",
-)
-def prev_track():
-  return pc.prev_track()
+MEDIA_RESPONSES = {
+    "next": "Включен следующий трек.",
+    "prev": "Включен предыдущий трек.",
+    "play_pause": "Воспроизведение переключено.",
+    "volume_up": "Сделал погромче.",
+    "volume_down": "Сделал потише.",
+    "mute": "Звук переключен.",
+}
 
 
 @register_tool(
-    name="play_pause_track",
-    description="Пауза или продолжение музыки на ПК.",
-    parameters={"type": "object", "properties": {}},
-    response_template="Воспроизведение переключено.",
-)
-def play_pause_track():
-  return pc.play_pause()
-
-
-@register_tool(
-    name="volume_up",
-    description="Сделать звук на ПК громче.",
+    name="control_media",
+    description="Управление плеером и громкостью звука на ПК (пауза/плей, следующий/предыдущий трек, громче, тише, заглушить).",
     parameters={
         "type": "object",
-        "properties": {"steps": {"type": "integer", "description": "Шагов (1-10)"}},
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["play_pause", "next", "prev", "volume_up", "volume_down", "mute"],
+            },
+            "steps": {
+                "type": "integer",
+                "description": "Количество шагов громкости от 1 до 10 (нужно только для volume_up и volume_down)",
+            },
+        },
+        "required": ["action"],
     },
-    response_template="Сделал погромче.",
+    response_template=lambda a, r: MEDIA_RESPONSES.get(a.get("action"), "Действие выполнено."),
 )
-def volume_up(steps: int = 5):
-  return pc.volume_up(steps)
-
-
-@register_tool(
-    name="volume_down",
-    description="Сделать звук на ПК тише.",
-    parameters={
-        "type": "object",
-        "properties": {"steps": {"type": "integer", "description": "Шагов (1-10)"}},
-    },
-    response_template="Сделал потише.",
-)
-def volume_down(steps: int = 5):
-  return pc.volume_down(steps)
-
-
-@register_tool(
-    name="volume_mute",
-    description="Заглушить/включить звук на ПК.",
-    parameters={"type": "object", "properties": {}},
-    response_template="Звук переключен.",
-)
-def volume_mute():
-  return pc.volume_mute()
+def control_media(action: str, steps: int = 5):
+    if action == "next":
+        return pc.next_track()
+    elif action == "prev":
+        return pc.prev_track()
+    elif action == "play_pause":
+        return pc.play_pause()
+    elif action == "volume_up":
+        return pc.volume_up(steps)
+    elif action == "volume_down":
+        return pc.volume_down(steps)
+    elif action == "mute":
+        return pc.volume_mute()
+    return {"status": "error", "message": f"Неизвестное действие медиа: {action}"}
 
 
 @register_tool(
@@ -262,6 +183,53 @@ def open_app(app_name: str):
 )
 def remember_user_preference(fact: str):
   return memory.save_fact(fact)
+
+
+def _format_notes_reply(a: dict, r: dict) -> str:
+    if r.get("status") != "success":
+        return r.get("message", "Ошибка при работе с заметками.")
+
+    action = a.get("action")
+    if action == "add":
+        note = r.get("note", {})
+        return f"Записал под номером {note.get('id')}: {note.get('text')}."
+
+    elif action == "list":
+        notes = r.get("notes", [])
+        if not notes:
+            return "Список заметок пуст."
+        items = [f"{n['id']}. {n['text']}" for n in notes]
+        return "Твои заметки: " + "; ".join(items) + "."
+
+    elif action == "delete":
+        deleted = r.get("deleted", {})
+        return f"Удалил заметку: {deleted.get('text')}."
+
+    return "Готово."
+@register_tool(
+    name="manage_notes",
+    description="Управление временными заметками и списками дел (добавить, прочитать список, удалить).",
+    parameters={
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["add", "list", "delete"],},
+            "text": {
+                "type": "string",
+                "description": "Текст новой заметки (нужно только для action='add')",
+            },
+            "target": {
+                "type": "string",
+                "description": "Номер (ID) или ключевое слово для удаления (нужно только для action='delete')",
+                },
+        },
+        "required": ["action"],
+    },
+    response_template=_format_notes_reply,
+)
+def tool_manage_notes(action: str, text: str = "", target: str | None = None):
+    return memory.manage_notes(action=action, text=text, target=target)
 
 # ==========================================
 # 4. СЦЕНАРИИ
